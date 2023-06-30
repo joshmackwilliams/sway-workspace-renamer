@@ -19,7 +19,7 @@ fn main() {
         .lines()
         .filter_map(|line| {
             let line = line.expect("[Workspace renamer] Failed to read line from icons file");
-            if let Some((name, icon)) = line.split_once(' ') {
+            if let Some((name, icon)) = line.split_once('=') {
                 Some((name.to_string(), icon.to_string()))
             } else {
                 println!("[Workspace renamer] Malformed line in icons file: {}", line);
@@ -41,7 +41,7 @@ fn main() {
         .subscribe([EventType::Window])
         .expect("[Workspace renamer] Failed to subscribe to events");
 
-    let window_regex = Regex::new(r"[a-zA-Z0-9://_\-\.][a-zA-Z0-9://_\-\.]+").expect("Bad regex");
+    let window_regex = Regex::new(r"([a-zA-Z0-9://_\-\.]|\* ){2,}").expect("Bad regex");
 
     // Main loop - process events
     for event in event_stream {
@@ -55,11 +55,12 @@ fn main() {
                             .get_workspaces()
                             .expect("[Workspace renamer] Failed to get workspaces")
                             .into_iter()
-                            .map(|workspace| {
+                            .filter_map(|workspace| {
                                 let number = workspace.num;
-                                let representation = workspace
-                                    .representation
-                                    .expect("[Workspace renamer] Workspace has no representation");
+                                // Sometimes we get no workspace representation when certain poorly-behaved
+                                // apps are open. In that case, treat it as an empty workspace
+                                let representation =
+                                    workspace.representation.unwrap_or_else(|| "".to_string());
                                 let window_names: Vec<&str> = window_regex
                                     .find_iter(&representation)
                                     .map(|m| {
@@ -68,16 +69,16 @@ fn main() {
                                         icons.get(m).map(|icon| icon.as_str()).unwrap_or(m)
                                     })
                                     .collect();
-                                if window_names.is_empty() {
+                                Some(if window_names.is_empty() {
                                     format!("rename workspace number {} to {}", number, number)
                                 } else {
                                     format!(
-                                        "rename workspace number {} to '{} {}'",
+                                        "rename workspace number {} to '{} {} '",
                                         number,
                                         number,
                                         window_names.join(" ")
                                     )
-                                }
+                                })
                             })
                             .collect();
 
@@ -92,8 +93,9 @@ fn main() {
                     _ => {}
                 }
             }
-            Err(_) => {
+            Err(e) => {
                 // An error here indicates that sway has exited, so we should temrinate
+                eprintln!("[Workspace renamer] Received error: {}", e);
                 exit(0);
             }
             Ok(_) => {
